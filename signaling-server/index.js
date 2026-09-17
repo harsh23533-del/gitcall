@@ -4,6 +4,7 @@
 
 require("dotenv").config();
 const { Server } = require("socket.io");
+const { filterProfanity } = require("./profanityFilter");
 
 const PORT = process.env.PORT || 4000;
 
@@ -54,8 +55,14 @@ io.on("connection", (socket) => {
   });
 
   // Step 8.1 — text chat overlay, relayed the same way as signaling messages.
+  // Step 9.4 — run through a basic profanity filter before relaying.
   socket.on("chat-message", ({ roomId, text }) => {
-    socket.to(roomId).emit("chat-message", { text, from: socket.id });
+    socket.to(roomId).emit("chat-message", { text: filterProfanity(text), from: socket.id });
+  });
+
+  // Step 8.2 — shared code snippet panel, relayed to the other peer in the room.
+  socket.on("code-update", ({ roomId, content }) => {
+    socket.to(roomId).emit("code-update", { content, from: socket.id });
   });
 
   socket.on("leave-room", ({ roomId }) => {

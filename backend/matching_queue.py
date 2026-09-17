@@ -28,6 +28,13 @@ def join_queue(user_id: int, tag: str | None = None) -> str | None:
     """
     Step 5.2 / 5.3 — try to find a waiting partner in the (optionally tagged)
     queue. Returns the room_id if paired, or None if now waiting.
+
+    KNOWN GAP: this does not yet check the blocked_users table (Phase 9,
+    Step 9.3) before pairing, so a blocked pair could theoretically be
+    matched again by pure chance. Wiring that in means querying Postgres on
+    every pop (or caching block-pairs in Redis) before accepting a partner —
+    left as a follow-up so the simple list-based queue stays fast for the
+    common case.
     """
     key = _queue_key(tag)
     uid = str(user_id)

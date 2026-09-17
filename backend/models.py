@@ -5,6 +5,7 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    Boolean,
     TIMESTAMP,
     ForeignKey,
     func,
@@ -26,6 +27,7 @@ class User(Base):
     role = Column(String(50), nullable=True)  # student / SDE / freelancer
     looking_for = Column(String(50), nullable=True)  # job / collab / mentorship / chat
     access_token_enc = Column(Text, nullable=True)  # encrypted GitHub token
+    is_suspended = Column(Boolean, default=False)  # Phase 9, Step 9.2 auto-flag
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 
@@ -70,3 +72,19 @@ class Report(Base):
 
     reporter = relationship("User", foreign_keys=[reporter_id])
     reported = relationship("User", foreign_keys=[reported_id])
+
+
+class BlockedUser(Base):
+    """Phase 9, Step 9.3 — block list. If either direction is blocked, the
+    matching queue should never pair these two again (see routes/reports.py
+    and the TODO note in matching_queue.py about wiring this check in)."""
+
+    __tablename__ = "blocked_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    blocker_id = Column(Integer, ForeignKey("users.id"))
+    blocked_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    blocker = relationship("User", foreign_keys=[blocker_id])
+    blocked = relationship("User", foreign_keys=[blocked_id])

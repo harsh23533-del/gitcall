@@ -21,12 +21,15 @@ export type CallStatus = "idle" | "connecting" | "connected" | "ended";
 export function useWebRTCCall(roomId: string | undefined) {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [chatLog, setChatLog] = useState<{ from: string; text: string }[]>([]);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [codeContent, setCodeContent] = useState("");
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
 
   useEffect(() => {
     if (!roomId) return;
@@ -45,6 +48,7 @@ export function useWebRTCCall(roomId: string | undefined) {
         return;
       }
       localStreamRef.current = stream;
+      cameraTrackRef.current = stream.getVideoTracks()[0] ?? null;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       // Step 6.2 — peer connection
@@ -106,6 +110,11 @@ export function useWebRTCCall(roomId: string | undefined) {
         setChatLog((log) => [...log, { from, text }]);
       });
 
+      // Step 8.2 — shared code snippet panel: relay content changes to the peer.
+      socket.on("code-update", ({ content }: { content: string }) => {
+        setCodeContent(content);
+      });
+
       socket.on("peer-left", () => {
         setStatus("ended");
       });
@@ -128,6 +137,55 @@ export function useWebRTCCall(roomId: string | undefined) {
     setChatLog((log) => [...log, { from: "me", text }]);
   }
 
+  // Step 8.2 — code snippet panel: broadcast local edits to the peer.
+  function updateCode(content: string) {
+    setCodeContent(content);
+    if (!roomId) return;
+    socketRef.current?.emit("code-update", { roomId, content });
+  }
+
+  // Step 8.3 — screen share: swap the outgoing video track for a display
+  // track, and swap it back when the person stops sharing.
+  async function toggleScreenShare() {
+    const pc = pcRef.current;
+    if (!pc) return;
+
+    const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+    if (!sender) return;
+
+    if (!isScreenSharing) {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = screenStream.getVideoTracks()[0];
+        await sender.replaceTrack(screenTrack);
+
+        if (localVideoRef.current) localVideoRef.current.srcObject = screenStream;
+        setIsScreenSharing(true);
+
+        // If the user stops sharing via the browser's own "Stop sharing"
+        // control, fall back to the camera automatically.
+        screenTrack.onended = () => {
+          void stopScreenShareInternal();
+        };
+      } catch (err) {
+        console.error("Screen share failed or was cancelled", err);
+      }
+    } else {
+      await stopScreenShareInternal();
+    }
+
+    async function stopScreenShareInternal() {
+      const cameraTrack = cameraTrackRef.current;
+      if (cameraTrack) {
+        await sender!.replaceTrack(cameraTrack);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+      }
+      setIsScreenSharing(false);
+    }
+  }
+
   function endCall() {
     socketRef.current?.emit("leave-room", { roomId });
     setStatus("ended");
@@ -140,5 +198,9 @@ export function useWebRTCCall(roomId: string | undefined) {
     chatLog,
     sendChatMessage,
     endCall,
+    isScreenSharing,
+    toggleScreenShare,
+    codeContent,
+    updateCode,
   };
 }

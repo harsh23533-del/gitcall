@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine
-from routes import users, matching
+from routes import users, matching, reports
 
 app = FastAPI(title="DevConnect API")
 
@@ -28,6 +28,4 @@ def health():
 
 app.include_router(users.router)
 app.include_router(matching.router)
-# Reports router (Phase 9) lands here once written:
-# from routes import reports
-# app.include_router(reports.router)
+app.include_router(reports.router)
