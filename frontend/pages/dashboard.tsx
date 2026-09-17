@@ -1,17 +1,60 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import LoginButton from "../components/LoginButton";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const TAGS = [
+  { value: "", label: "Random" },
+  { value: "python", label: "Python" },
+  { value: "react", label: "React" },
+  { value: "mobile", label: "Mobile" },
+];
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const [tag, setTag] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/");
     }
   }, [status, router]);
+
+  async function handleStart() {
+    if (!session?.dbUserId) {
+      setError("Still setting up your profile — try again in a second.");
+      return;
+    }
+
+    setSearching(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`${API_URL}/matching/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: session.dbUserId, tag: tag || null }),
+      });
+      const data = await res.json();
+
+      if (data.status === "matched") {
+        router.push(`/call/${data.room_id}`);
+      } else {
+        // Waiting for a partner — a real app would poll /matching/room/{id}
+        // or listen on a socket event; kept simple here for the MVP.
+        setError("Waiting for another developer to join… try Start again shortly.");
+      }
+    } catch {
+      setError("Couldn't reach the matching service. Is the backend running?");
+    } finally {
+      setSearching(false);
+    }
+  }
 
   if (status === "loading" || !session) {
     return <main className="min-h-screen flex items-center justify-center">Loading…</main>;
@@ -24,9 +67,31 @@ export default function Dashboard() {
         <LoginButton />
       </div>
 
-      <div className="w-full max-w-md border rounded-lg p-6 text-center text-gray-400">
-        Match mode selector + Start button land here once the Redis matching
-        queue (Phase 5) and WebRTC call screen (Phase 6) are wired up.
+      <div className="w-full max-w-md border rounded-lg p-6 flex flex-col gap-4">
+        <label className="text-sm text-gray-500">
+          Match by
+          <select
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            className="mt-1 w-full border rounded-md px-3 py-2"
+          >
+            {TAGS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          onClick={handleStart}
+          disabled={searching}
+          className="w-full px-4 py-3 rounded-md bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-50"
+        >
+          {searching ? "Finding a match…" : "Start"}
+        </button>
+
+        {error && <p className="text-sm text-amber-600">{error}</p>}
       </div>
     </main>
   );
