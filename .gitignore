@@ -9,6 +9,9 @@ __pycache__/
 *.pyc
 .env
 
+# TypeScript build info
+*.tsbuildinfo
+
 # Env files (real secrets — never commit)
 .env
 .env.local
