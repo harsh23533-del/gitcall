@@ -62,6 +62,54 @@ devconnect/
 See the full build guide for the phase-by-phase plan: OAuth, matching engine, WebRTC signaling,
 in-call features, moderation, and deployment.
 
+### Auth model
+
+The frontend's NextAuth session cookie stays fully managed by NextAuth (JWE-encrypted, as
+usual). Separately, on login it signs a small HS256 API token (`session.apiToken`) containing
+just `{ sub: <internal user id>, githubUsername }`, using the same secret as `JWT_SECRET` /
+`NEXTAUTH_SECRET`. The browser sends that as `Authorization: Bearer <token>` on calls to the
+FastAPI backend, which verifies it (`backend/auth.py`) and trusts its `sub` as the caller's
+identity — request bodies no longer carry a self-reported `user_id`. The one exception is
+`POST /users/sync`, called server-to-server by NextAuth's `jwt()` callback before an api token
+exists yet; that's gated by a shared `INTERNAL_API_SECRET` header instead.
+
+### Migrations
+
+Schema changes go through Alembic (`backend/migrations/`), not the dev-only
+`Base.metadata.create_all()` in `main.py`. Run `alembic upgrade head` from `backend/` after
+setting `DATABASE_URL`.
+
+## Running tests (Phase 11)
+
+```bash
+cd backend
+pip install -r requirements.txt
+pytest -v
+```
+
+Needs a Redis instance reachable at `REDIS_URL` (defaults to `redis://localhost:6379`) — the
+matching-queue tests are integration tests against real Redis, not mocks. Postgres is not
+required: tests point `DATABASE_URL` at a throwaway local SQLite file instead. The same suite
+runs in CI on every push (`.github/workflows/ci.yml`), alongside a frontend typecheck + build
+and a signaling-server syntax check.
+
+## Deployment (Phase 12)
+
+- **Frontend** → Vercel. Connect the repo, set the project root to `frontend/`, add the env vars
+  from `frontend/.env.local.example` (with real values and your prod domain for `NEXTAUTH_URL`).
+- **Backend + signaling server** → `render.yaml` at the repo root is a Render Blueprint that
+  provisions both (via their Dockerfiles) plus managed Postgres and Redis in one go. Railway
+  works too — point it at `backend/Dockerfile` / `signaling-server/Dockerfile` directly and wire
+  up the same env vars by hand. Either way, set `JWT_SECRET`/`INTERNAL_API_SECRET` to match the
+  frontend's `NEXTAUTH_SECRET`/`INTERNAL_API_SECRET` exactly.
+- **coturn (TURN server)** → run on a small VPS (DigitalOcean droplet or similar) — managed
+  platforms rarely host raw UDP relays well. Open UDP/TCP 3478 plus a relay port range, per
+  coturn's own docs.
+- **GitHub OAuth App** → once you have a real domain, add its callback URL
+  (`https://<your-domain>/api/auth/callback/github`) to the OAuth App's settings.
+- **Monitoring** → UptimeRobot (uptime) + Sentry (errors) on both frontend and backend, per the
+  original build guide. Not wired up here — needs your own Sentry/UptimeRobot accounts.
+
 ## License
 
 TBD

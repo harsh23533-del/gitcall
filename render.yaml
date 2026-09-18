@@ -1,0 +1,61 @@
+# Render Blueprint — https://render.com/docs/infrastructure-as-code
+#
+# Deploys the FastAPI backend and the Socket.io signaling server, each
+# with their own Dockerfile, plus managed Postgres and Redis (Phase 12.2).
+# coturn (Phase 12.3) is deliberately NOT here — Render doesn't host raw
+# UDP/TCP relays well; run it on a small VPS instead (see README).
+#
+# Usage: connect this repo on Render's dashboard, it will detect this file
+# and offer to create all services below in one click. Any env var without
+# a `value` here needs to be filled in on Render's dashboard after creation
+# (secrets should never be committed).
+
+databases:
+  - name: devconnect-postgres
+    plan: free
+    databaseName: devconnect
+    user: devconnect
+
+services:
+  - type: redis
+    name: devconnect-redis
+    plan: free
+    ipAllowList: []
+
+  - type: web
+    name: devconnect-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: devconnect-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: devconnect-redis
+          type: redis
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false # must match the frontend's NEXTAUTH_SECRET — set manually
+      - key: INTERNAL_API_SECRET
+        sync: false # must match the frontend's INTERNAL_API_SECRET — set manually
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: ADMIN_GITHUB_USERNAMES
+        sync: false
+
+  - type: web
+    name: devconnect-signaling
+    runtime: docker
+    dockerfilePath: ./signaling-server/Dockerfile
+    dockerContext: ./signaling-server
+    plan: free
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          name: devconnect-redis
+          type: redis
+          property: connectionString
