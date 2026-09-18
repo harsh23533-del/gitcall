@@ -78,7 +78,26 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
 @router.get("")
 def list_reports(db: Session = Depends(get_db)):
     """Feeds the admin moderation dashboard (Phase 10, /admin)."""
-    return db.query(Report).order_by(Report.created_at.desc()).all()
+    reports = db.query(Report).order_by(Report.created_at.desc()).all()
+    results = []
+    for r in reports:
+        reporter = db.query(User).filter(User.id == r.reporter_id).first()
+        reported = db.query(User).filter(User.id == r.reported_id).first()
+        results.append(
+            {
+                "id": r.id,
+                "reporter_id": r.reporter_id,
+                "reporter_username": reporter.username if reporter else None,
+                "reported_id": r.reported_id,
+                "reported_username": reported.username if reported else None,
+                "reported_is_suspended": reported.is_suspended if reported else None,
+                "reason": r.reason,
+                "details": r.details,
+                "status": r.status,
+                "created_at": r.created_at,
+            }
+        )
+    return results
 
 
 @router.post("/block")
@@ -93,3 +112,29 @@ def block_user(reporter_id: int, reported_id: int, db: Session = Depends(get_db)
         db.add(BlockedUser(blocker_id=reporter_id, blocked_id=reported_id))
         db.commit()
     return {"status": "blocked"}
+
+
+class ResolveReportRequest(BaseModel):
+    status: str  # "resolved" / "dismissed" / "pending"
+
+
+@router.patch("/{report_id}")
+def resolve_report(report_id: int, payload: ResolveReportRequest, db: Session = Depends(get_db)):
+    """Admin dashboard action — mark a report reviewed."""
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        return {"status": "not_found"}
+    report.status = payload.status
+    db.commit()
+    return {"status": "updated", "report_id": report.id, "new_status": report.status}
+
+
+@router.post("/{reported_id}/unsuspend")
+def unsuspend_user(reported_id: int, db: Session = Depends(get_db)):
+    """Admin dashboard action — lift an auto-suspension after review."""
+    user = db.query(User).filter(User.id == reported_id).first()
+    if not user:
+        return {"status": "not_found"}
+    user.is_suspended = False
+    db.commit()
+    return {"status": "unsuspended", "user_id": user.id}
