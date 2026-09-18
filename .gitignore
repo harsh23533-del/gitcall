@@ -8,6 +8,9 @@ venv/
 __pycache__/
 *.pyc
 .env
+test_ci.db
+.pytest_cache/
+*.rdb
 
 # TypeScript build info
 *.tsbuildinfo
