@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { useState } from "react";
 import { useWebRTCCall } from "../../hooks/useWebRTCCall";
 import ReportModal from "../../components/ReportModal";
+import PartnerProfileCard from "../../components/PartnerProfileCard";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -39,6 +40,8 @@ export default function CallRoom() {
   const [showReport, setShowReport] = useState(false);
   const [reportSent, setReportSent] = useState(false);
 
+  const partnerId = getPartnerId(roomId, session?.dbUserId);
+
   function handleSend() {
     if (!chatInput.trim()) return;
     sendChatMessage(chatInput.trim());
@@ -47,12 +50,20 @@ export default function CallRoom() {
 
   function handleEndCall() {
     endCall();
+    if (session?.dbUserId) {
+      // Closes out the Match row (ended_at/duration) and requeues this user
+      // on the backend — see backend/matching_queue.py leave_room().
+      fetch(`${API_URL}/matching/skip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: session.dbUserId }),
+      }).catch((err) => console.error("Failed to notify backend of call end", err));
+    }
     router.push("/dashboard");
   }
 
   async function handleReportSubmit(reason: string, details: string) {
-    const reportedId = getPartnerId(roomId, session?.dbUserId);
-    if (!session?.dbUserId || !reportedId) {
+    if (!session?.dbUserId || !partnerId) {
       setShowReport(false);
       return;
     }
@@ -63,7 +74,7 @@ export default function CallRoom() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reporter_id: session.dbUserId,
-          reported_id: reportedId,
+          reported_id: partnerId,
           reason,
           details: details || null,
         }),
@@ -97,6 +108,7 @@ export default function CallRoom() {
         />
 
         <div className="absolute top-4 left-4 flex items-center gap-2">
+          <PartnerProfileCard userId={partnerId} />
           <span className="text-sm text-gray-300 bg-black/50 px-3 py-1 rounded-full">
             {status === "connecting" && "Connecting…"}
             {status === "connected" && "Connected"}
