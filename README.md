@@ -95,20 +95,33 @@ and a signaling-server syntax check.
 
 ## Deployment (Phase 12)
 
-- **Frontend** → Vercel. Connect the repo, set the project root to `frontend/`, add the env vars
-  from `frontend/.env.local.example` (with real values and your prod domain for `NEXTAUTH_URL`).
-- **Backend + signaling server** → `render.yaml` at the repo root is a Render Blueprint that
-  provisions both (via their Dockerfiles) plus managed Postgres and Redis in one go. Railway
-  works too — point it at `backend/Dockerfile` / `signaling-server/Dockerfile` directly and wire
-  up the same env vars by hand. Either way, set `JWT_SECRET`/`INTERNAL_API_SECRET` to match the
-  frontend's `NEXTAUTH_SECRET`/`INTERNAL_API_SECRET` exactly.
+All three services (frontend, backend, signaling) deploy to **Render** from one `render.yaml`
+Blueprint at the repo root, alongside managed Postgres and Redis:
+
+1. On Render: **New → Blueprint** → connect this repo. Render detects `render.yaml` and proposes
+   `devconnect-frontend`, `devconnect-backend`, `devconnect-signaling`, `devconnect-redis`, and
+   `devconnect-postgres` together.
+2. Fill in the env vars marked `sync: false` in `render.yaml` on each service's dashboard page —
+   `JWT_SECRET` and `INTERNAL_API_SECRET` must be identical between the frontend and backend
+   services (they're how the two verify each other), and `GITHUB_ID`/`GITHUB_SECRET` come from
+   your GitHub OAuth App.
+3. After the first deploy, note the `.onrender.com` URL Render assigned each service, then fill
+   in `devconnect-frontend`'s `NEXTAUTH_URL`, `NEXT_PUBLIC_API_URL`, and
+   `NEXT_PUBLIC_SIGNALING_URL` with those URLs and trigger a manual redeploy of just that service
+   (the `NEXT_PUBLIC_*` ones are baked in at build time — see `frontend/Dockerfile` — so a plain
+   restart won't pick up the change).
+4. Update the GitHub OAuth App's callback URL to
+   `https://<devconnect-frontend's-url>/api/auth/callback/github`.
+
+Vercel/Railway work too if you'd rather split things across platforms — point them at
+`frontend/Dockerfile`, `backend/Dockerfile`, `signaling-server/Dockerfile` respectively and wire
+up the same env vars by hand.
+
 - **coturn (TURN server)** → run on a small VPS (DigitalOcean droplet or similar) — managed
   platforms rarely host raw UDP relays well. Open UDP/TCP 3478 plus a relay port range, per
   coturn's own docs.
-- **GitHub OAuth App** → once you have a real domain, add its callback URL
-  (`https://<your-domain>/api/auth/callback/github`) to the OAuth App's settings.
-- **Monitoring** → UptimeRobot (uptime) + Sentry (errors) on both frontend and backend, per the
-  original build guide. Not wired up here — needs your own Sentry/UptimeRobot accounts.
+- **Monitoring** → UptimeRobot (uptime) + Sentry (errors), per the original build guide. Not
+  wired up here — needs your own Sentry/UptimeRobot accounts.
 
 ## License
 

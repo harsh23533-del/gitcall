@@ -1,14 +1,18 @@
 # Render Blueprint — https://render.com/docs/infrastructure-as-code
 #
-# Deploys the FastAPI backend and the Socket.io signaling server, each
-# with their own Dockerfile, plus managed Postgres and Redis (Phase 12.2).
-# coturn (Phase 12.3) is deliberately NOT here — Render doesn't host raw
-# UDP/TCP relays well; run it on a small VPS instead (see README).
+# Deploys all three services (frontend, backend, signaling server), each
+# with their own Dockerfile, plus managed Postgres and Redis (Phase 12.2) —
+# everything on one platform. coturn (Phase 12.3) is deliberately NOT here —
+# Render doesn't host raw UDP/TCP relays well; run it on a small VPS instead
+# (see README).
 #
 # Usage: connect this repo on Render's dashboard, it will detect this file
 # and offer to create all services below in one click. Any env var without
 # a `value` here needs to be filled in on Render's dashboard after creation
-# (secrets should never be committed).
+# (secrets should never be committed). Do the first deploy, note the URL
+# Render assigns each service, then fill in devconnect-frontend's
+# NEXTAUTH_URL / NEXT_PUBLIC_API_URL / NEXT_PUBLIC_SIGNALING_URL and
+# redeploy that one service.
 
 databases:
   - name: devconnect-postgres
@@ -59,3 +63,33 @@ services:
           name: devconnect-redis
           type: redis
           property: connectionString
+
+  - type: web
+    name: devconnect-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    envVars:
+      - key: GITHUB_ID
+        sync: false
+      - key: GITHUB_SECRET
+        sync: false
+      - key: NEXTAUTH_SECRET
+        sync: false # must match the backend's JWT_SECRET exactly
+      - key: INTERNAL_API_SECRET
+        sync: false # must match the backend's INTERNAL_API_SECRET exactly
+      # These three depend on the URLs Render assigns the other services —
+      # https://<service-name>.onrender.com by default, but confirm on each
+      # service's dashboard page. Fill in after the first deploy, then
+      # trigger a manual redeploy of this service (NEXT_PUBLIC_* values are
+      # baked in at build time, see frontend/Dockerfile, so a plain restart
+      # won't pick up a change here).
+      - key: NEXTAUTH_URL
+        sync: false # this service's own URL, e.g. https://devconnect-frontend.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        sync: false # devconnect-backend's URL
+      - key: NEXT_PUBLIC_SIGNALING_URL
+        sync: false # devconnect-signaling's URL
+      - key: NEXT_PUBLIC_ADMIN_USERNAMES
+        sync: false # comma-separated GitHub usernames, should match backend's ADMIN_GITHUB_USERNAMES
