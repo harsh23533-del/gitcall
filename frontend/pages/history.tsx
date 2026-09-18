@@ -35,13 +35,15 @@ export default function History() {
   }, [status, router]);
 
   useEffect(() => {
-    if (!session?.dbUserId) return;
-    fetch(`${API_URL}/users/${session.dbUserId}/matches`)
+    if (!session?.dbUserId || !session?.apiToken) return;
+    fetch(`${API_URL}/users/${session.dbUserId}/matches`, {
+      headers: { Authorization: `Bearer ${session.apiToken}` },
+    })
       .then((res) => res.json())
       .then((data) => setMatches(data))
       .catch(() => setMatches([]))
       .finally(() => setLoading(false));
-  }, [session?.dbUserId]);
+  }, [session?.dbUserId, session?.apiToken]);
 
   if (status === "loading" || !session) {
     return <main className="min-h-screen flex items-center justify-center">Loading…</main>;

@@ -1,27 +1,16 @@
 """
-Verifies the session token issued by NextAuth so protected FastAPI routes know
-which user is calling.
+Verifies the API bearer token issued by the frontend so protected FastAPI
+routes know which user is calling.
 
-IMPORTANT NOTE (read before wiring this into production):
-NextAuth's default JWT strategy does NOT produce a plain signed JWT — it
-produces an encrypted JWE (A256GCM) derived from NEXTAUTH_SECRET, which
-python-jose's `jwt.decode` (HS256) cannot verify as-is. To make this
-cross-service verification work, override the `encode`/`decode` functions in
-the frontend's NextAuth `jwt` config to emit a standard HS256-signed JWT
-instead of the default JWE, e.g.:
-
-    // frontend/pages/api/auth/[...nextauth].ts
-    jwt: {
-      async encode({ secret, token }) {
-        return jwt.sign(token as object, secret as string, { algorithm: "HS256" });
-      },
-      async decode({ secret, token }) {
-        return jwt.verify(token as string, secret as string) as JWT;
-      },
-    },
-
-Once that's in place, this dependency will correctly verify tokens issued by
-the frontend using the same JWT_SECRET / NEXTAUTH_SECRET.
+NOTE on the earlier approach (kept for history): NextAuth's own session
+cookie uses an encrypted JWE by default, which python-jose's HS256 decoder
+can't verify as-is, and overriding NextAuth's encode/decode to force HS256
+would also change how the session cookie itself is protected. Instead, the
+frontend signs a small, separate HS256 token (see
+`frontend/pages/api/auth/[...nextauth].ts`, the `apiToken` claim) purely for
+calling this backend. It carries only { sub: <internal user id>,
+githubUsername }, signed with the same JWT_SECRET / NEXTAUTH_SECRET both
+services share.
 """
 
 import os
@@ -45,4 +34,28 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session token",
         )
+    if "sub" not in payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject",
+        )
     return payload
+
+
+def require_matching_user_id(user_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Use as a dependency on routes that take a `user_id` in the request body:
+    raises 403 if the authenticated token's subject doesn't match the
+    user_id the caller is claiming to act as.
+    """
+    try:
+        token_user_id = int(current_user["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
+
+    if token_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token does not authorize acting as this user_id",
+        )
+    return current_user

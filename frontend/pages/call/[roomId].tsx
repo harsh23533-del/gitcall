@@ -1,6 +1,6 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWebRTCCall } from "../../hooks/useWebRTCCall";
 import ReportModal from "../../components/ReportModal";
 import PartnerProfileCard from "../../components/PartnerProfileCard";
@@ -8,8 +8,8 @@ import PartnerProfileCard from "../../components/PartnerProfileCard";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /** room_id is "room_{userA}_{userB}" (see backend/matching_queue.py) — pull
- *  the *other* user's id out of it so the report button knows who to file
- *  against. */
+ *  the *other* user's id out of it so the report button / profile card /
+ *  skip flow know who the partner is. */
 function getPartnerId(roomId: string | undefined, myId: number | undefined): number | null {
   if (!roomId || !myId) return null;
   const parts = roomId.replace(/^room_/, "").split("_");
@@ -21,6 +21,7 @@ export default function CallRoom() {
   const router = useRouter();
   const { data: session } = useSession();
   const roomId = typeof router.query.roomId === "string" ? router.query.roomId : undefined;
+  const tag = typeof router.query.tag === "string" ? router.query.tag : "";
 
   const {
     status,
@@ -39,6 +40,7 @@ export default function CallRoom() {
   const [showCodePanel, setShowCodePanel] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [reportSent, setReportSent] = useState(false);
+  const [skipping, setSkipping] = useState(false);
 
   const partnerId = getPartnerId(roomId, session?.dbUserId);
 
@@ -48,22 +50,46 @@ export default function CallRoom() {
     setChatInput("");
   }
 
-  function handleEndCall() {
+  // Step 5.4 — actually tell the backend the call ended: this closes out the
+  // Postgres match row (see backend/matching_queue.leave_room) and
+  // immediately tries to find the person a new match under the same tag
+  // they started with. /matching/skip requires a bearer token now (see
+  // backend/routes/matching.py), so this can't just fire-and-forget with a
+  // plain user_id body anymore.
+  async function handleEndCall() {
     endCall();
-    if (session?.dbUserId) {
-      // Closes out the Match row (ended_at/duration) and requeues this user
-      // on the backend — see backend/matching_queue.py leave_room().
-      fetch(`${API_URL}/matching/skip`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: session.dbUserId }),
-      }).catch((err) => console.error("Failed to notify backend of call end", err));
+
+    if (!session?.apiToken) {
+      router.push("/dashboard");
+      return;
     }
+
+    setSkipping(true);
+    try {
+      const res = await fetch(`${API_URL}/matching/skip`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.apiToken}`,
+        },
+        body: JSON.stringify({ tag: tag || null }),
+      });
+      const data = await res.json();
+      if (data.status === "matched" && data.room_id) {
+        router.push(`/call/${data.room_id}?tag=${encodeURIComponent(tag)}`);
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to notify backend of call end", err);
+    } finally {
+      setSkipping(false);
+    }
+
     router.push("/dashboard");
   }
 
   async function handleReportSubmit(reason: string, details: string) {
-    if (!session?.dbUserId || !partnerId) {
+    if (!session?.dbUserId || !partnerId || !session?.apiToken) {
       setShowReport(false);
       return;
     }
@@ -71,7 +97,10 @@ export default function CallRoom() {
     try {
       await fetch(`${API_URL}/reports`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.apiToken}`,
+        },
         body: JSON.stringify({
           reporter_id: session.dbUserId,
           reported_id: partnerId,
@@ -185,9 +214,10 @@ export default function CallRoom() {
         </button>
         <button
           onClick={handleEndCall}
-          className="px-6 py-2 rounded-md bg-red-600 hover:bg-red-500 font-medium"
+          disabled={skipping}
+          className="px-6 py-2 rounded-md bg-red-600 hover:bg-red-500 font-medium disabled:opacity-50"
         >
-          End / Skip
+          {skipping ? "Finding next…" : "End / Skip"}
         </button>
       </div>
 

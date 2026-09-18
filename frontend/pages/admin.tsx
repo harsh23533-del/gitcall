@@ -40,25 +40,38 @@ export default function Admin() {
   }, [status, router]);
 
   useEffect(() => {
-    if (!isAdmin) return;
-    fetch(`${API_URL}/reports`)
-      .then((res) => res.json())
+    if (!isAdmin || !session?.apiToken) return;
+    fetch(`${API_URL}/reports`, {
+      headers: { Authorization: `Bearer ${session.apiToken}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        return res.json();
+      })
       .then(setReports)
       .catch(() => setReports([]))
       .finally(() => setLoading(false));
-  }, [isAdmin]);
+  }, [isAdmin, session?.apiToken]);
 
   async function resolveReport(id: number, newStatus: string) {
+    if (!session?.apiToken) return;
     await fetch(`${API_URL}/reports/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.apiToken}`,
+      },
       body: JSON.stringify({ status: newStatus }),
     });
     setReports((rs) => rs.map((r) => (r.id === id ? { ...r, status: newStatus } : r)));
   }
 
   async function unsuspend(userId: number) {
-    await fetch(`${API_URL}/reports/${userId}/unsuspend`, { method: "POST" });
+    if (!session?.apiToken) return;
+    await fetch(`${API_URL}/reports/${userId}/unsuspend`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.apiToken}` },
+    });
     setReports((rs) =>
       rs.map((r) => (r.reported_id === userId ? { ...r, reported_is_suspended: false } : r))
     );

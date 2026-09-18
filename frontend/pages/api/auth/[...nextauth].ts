@@ -1,5 +1,8 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.NEXTAUTH_SECRET as string;
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -36,7 +39,12 @@ export const authOptions: NextAuthOptions = {
           try {
             const res = await fetch(`${apiUrl}/users/sync`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                // Only the Next.js server holds this — see backend
+                // routes/users.py's INTERNAL_API_SECRET check.
+                "X-Internal-Secret": process.env.INTERNAL_API_SECRET || "",
+              },
               body: JSON.stringify({
                 github_id: githubProfile.id,
                 username: githubProfile.login,
@@ -46,9 +54,22 @@ export const authOptions: NextAuthOptions = {
             });
             const data = await res.json();
             token.dbUserId = data.user_id;
+
+            // Sign a small, separate API token (NOT the NextAuth session
+            // token itself) that the browser can send as
+            // `Authorization: Bearer` on calls to the FastAPI backend. See
+            // backend/auth.py for why this is a separate token rather than
+            // reusing NextAuth's own (JWE-encrypted) session JWT.
+            if (data.user_id) {
+              token.apiToken = jwt.sign(
+                { sub: String(data.user_id), githubUsername: githubProfile.login },
+                JWT_SECRET,
+                { algorithm: "HS256", expiresIn: "7d" }
+              );
+            }
           } catch (err) {
             // Don't block sign-in if the backend sync call fails — log and
-            // move on; dbUserId just won't be set this session.
+            // move on; dbUserId/apiToken just won't be set this session.
             console.error("users/sync failed:", err);
           }
         }
@@ -62,6 +83,7 @@ export const authOptions: NextAuthOptions = {
       session.githubUsername = token.githubUsername as string | undefined;
       session.avatarUrl = token.avatarUrl as string | undefined;
       session.dbUserId = token.dbUserId as number | undefined;
+      session.apiToken = token.apiToken as string | undefined;
       return session;
     },
   },

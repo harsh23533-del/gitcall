@@ -26,7 +26,7 @@ export default function Dashboard() {
   }, [status, router]);
 
   async function handleStart() {
-    if (!session?.dbUserId) {
+    if (!session?.dbUserId || !session?.apiToken) {
       setError("Still setting up your profile — try again in a second.");
       return;
     }
@@ -37,13 +37,16 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${API_URL}/matching/join`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: session.dbUserId, tag: tag || null }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.apiToken}`,
+        },
+        body: JSON.stringify({ tag: tag || null }),
       });
       const data = await res.json();
 
       if (data.status === "matched") {
-        router.push(`/call/${data.room_id}`);
+        router.push(`/call/${data.room_id}?tag=${encodeURIComponent(tag || "")}`);
       } else {
         // Waiting for a partner — a real app would poll /matching/room/{id}
         // or listen on a socket event; kept simple here for the MVP.
@@ -64,7 +67,12 @@ export default function Dashboard() {
     <main className="min-h-screen flex flex-col items-center justify-center gap-6 px-4">
       <div className="flex items-center justify-between w-full max-w-md">
         <h1 className="text-2xl font-semibold">Welcome, {session.githubUsername}</h1>
-        <LoginButton />
+        <div className="flex items-center gap-3">
+          <a href="/history" className="text-sm text-gray-500 hover:text-gray-800">
+            History
+          </a>
+          <LoginButton />
+        </div>
       </div>
 
       <div className="w-full max-w-md border rounded-lg p-6 flex flex-col gap-4">
