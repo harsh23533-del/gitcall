@@ -1,6 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from database import get_db
 from matching_queue import join_queue, get_current_room, leave_room
 
 router = APIRouter(prefix="/matching", tags=["matching"])
@@ -17,22 +19,22 @@ class SkipRequest(BaseModel):
 
 
 @router.post("/join")
-def join(payload: JoinRequest):
-    room_id = join_queue(payload.user_id, payload.tag)
+def join(payload: JoinRequest, db: Session = Depends(get_db)):
+    room_id = join_queue(payload.user_id, payload.tag, db=db)
     if room_id:
         return {"status": "matched", "room_id": room_id}
     return {"status": "waiting"}
 
 
 @router.post("/skip")
-def skip(payload: SkipRequest):
+def skip(payload: SkipRequest, db: Session = Depends(get_db)):
     """
     Step 5.4 — leave the current room, then immediately requeue the user who
     skipped. The response's partner_id tells the caller (signaling server)
     who to notify so their call ends and they can requeue too.
     """
-    partner_id = leave_room(payload.user_id)
-    room_id = join_queue(payload.user_id, payload.tag)
+    partner_id = leave_room(payload.user_id, db=db)
+    room_id = join_queue(payload.user_id, payload.tag, db=db)
 
     return {
         "status": "matched" if room_id else "waiting",
